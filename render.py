@@ -24,6 +24,9 @@ def parse_args():
     parser.add_argument("-i", "--input_obj", type=str, default="cube.obj")
     parser.add_argument("-n", "--n_views", type=int, default=8)
 
+    parser.add_argument("-d", "--device", type=str, default="CPU", help="Can be 'CPU' or 'GPU'. (!) Not tested for 'GPU'")
+    parser.add_argument("-u", "--export_uv_layout", action='store_true', help="If set, the UV layout will be saved. (!) Doesn't work in background mode")
+
     args = parser.parse_args(argv)
 
     return args
@@ -102,6 +105,23 @@ def build_flat_texture_material(texture_path):
 
 
 def main(args):
+    # set device
+    device = args.device
+    device_type = "NONE" if device == "CPU" else "CUDA"
+    prefs = bpy.context.preferences.addons['cycles'].preferences
+
+    # set the device_type
+    bpy.context.preferences.addons["cycles"].preferences.compute_device_type = device_type
+
+    # set the device and feature set
+    bpy.context.scene.cycles.device = device
+    bpy.context.scene.cycles.feature_set = "SUPPORTED"
+
+    print(prefs.compute_device_type)
+
+    for d in prefs.devices:
+        print(d.name)
+
     # global setup
     clear_scene()
     root = os.path.dirname(os.path.realpath(__file__))
@@ -149,20 +169,21 @@ def main(args):
     obj = scene.objects[obj_name]
 
     # save uv layout
-    bpy.ops.object.select_all(action='DESELECT')
-    obj.select_set(True)
-    bpy.context.view_layer.objects.active = obj
+    if args.export_uv_layout:
+        bpy.ops.object.select_all(action='DESELECT')
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
 
-    bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='SELECT')
-    for i in range(len(bpy.data.meshes[obj_name].edges)):
-        bpy.data.meshes[obj_name].edges[i].select = True
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        for i in range(len(bpy.data.meshes[obj_name].edges)):
+            bpy.data.meshes[obj_name].edges[i].select = True
 
-    # bpy.ops.uv.lightmap_pack()
-    bpy.ops.object.mode_set(mode='OBJECT')
+        # bpy.ops.uv.lightmap_pack()
+        bpy.ops.object.mode_set(mode='OBJECT')
 
-    bpy.ops.uv.export_layout(filepath=os.path.join(args.output_dir, "uv_unwrap.png"), mode='PNG', size=(512, 512), opacity=0.25)
+        bpy.ops.uv.export_layout(filepath=os.path.join(args.output_dir, "uv_unwrap.png"), mode='PNG', size=(512, 512), opacity=0.25)
 
     # create the camera
     camera_data = bpy.data.cameras.new('camera')
