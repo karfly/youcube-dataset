@@ -3,6 +3,8 @@ import sys
 import time
 import argparse
 import math
+import shutil
+import pickle
 
 import numpy as np
 
@@ -61,13 +63,12 @@ def build_cube(size=1.0, location=(0.0, 0.0, 0.0), rotation_euler=(0.0, 0.0, 0.0
     return cube
 
 
-def point_obj_at(obj, target, roll=0):
+def point_obj_at(obj, target):
     """
     Rotate obj to look at target
 
     :arg obj: the object to be rotated. Usually the camera
     :arg target: the location (3-tuple or Vector) to be looked at
-    :arg roll: The angle of rotation about the axis from obj to target in degres. 
 
     Based on: https://blender.stackexchange.com/a/5220/12947 (ideasman42)      
     """
@@ -78,15 +79,7 @@ def point_obj_at(obj, target, roll=0):
     direction = target - loc
 
     quat = direction.to_track_quat('-Z', 'Y')
-
-    # /usr/share/blender/scripts/addons/add_advanced_objects_menu/arrange_on_curve.py
-    quat = quat.to_matrix().to_4x4()
-    rollMatrix = mathutils.Matrix.Rotation(math.radians(roll), 4, 'Z')
-
-    # remember the current location, since assigning to obj.matrix_world changes it
-    loc = loc.to_tuple()
-    obj.matrix_world = quat @ rollMatrix
-    obj.location = loc
+    obj.rotation_euler = quat.to_euler()
 
 
 def build_flat_texture_material(texture_path):
@@ -168,6 +161,8 @@ def main(args):
     obj_name = scene.objects.keys()[0]
     obj = scene.objects[obj_name]
 
+    shutil.copy(args.input_obj, os.path.join(args.output_dir, "obj.obj"))
+
     # save uv layout
     if args.export_uv_layout:
         bpy.ops.object.select_all(action='DESELECT')
@@ -210,17 +205,48 @@ def main(args):
             camera_view_dir = os.path.join(render_dir, os.path.splitext(texture_name)[0], "{:06d}".format(camera_i))
             os.makedirs(camera_view_dir, exist_ok=True)
 
-            r = np.random.uniform(2.0, 10.0)
+            r = np.random.uniform(3.0, 10.0)
             theta = np.random.uniform(0.0, 2 * np.pi)
             phi = np.random.uniform(0.0, np.pi)
+            
             camera.location = (r * np.cos(theta) * np.sin(phi), r * np.sin(theta) * np.sin(phi), r * np.cos(phi))
             point_obj_at(camera, mathutils.Vector(obj.location))
-
+            
+        
             camera.location += mathutils.Vector(np.random.uniform(-1.0, 1.0, size=3))
+
+            # save camera
+            rotation = np.array(camera.rotation_euler.to_matrix())
+            translation = np.array(camera.location)
+
+            transformation_matrix = np.array([
+                [rotation[0, 0], rotation[0, 1], rotation[0, 2], translation[0]],
+                [rotation[1, 0], rotation[1, 1], rotation[1, 2], translation[1]],
+                [rotation[2, 0], rotation[2, 1], rotation[2, 2], translation[2]],
+                [0.0, 0.0, 0.0, 1.0]
+            ])
+
+            transformation_matrix = np.linalg.inv(transformation_matrix)
+            
+            depsgraph = bpy.context.evaluated_depsgraph_get()
+            projection_matrix = np.array(camera.calc_matrix_camera(
+                depsgraph,
+                x=scene.render.resolution_x, y=scene.render.resolution_y, scale_x=scene.render.pixel_aspect_x, scale_y=scene.render.pixel_aspect_y
+            ))
+            projection_matrix[1, 1] *= -1  # fix y
+
+            camera_path = os.path.join(camera_view_dir, "camera.pkl")
+            camera_dict = {
+                'transformation_matrix': transformation_matrix,
+                'projection_matrix': projection_matrix,
+                'resolution_x': scene.render.resolution_x,
+                'resolution_y': scene.render.resolution_y
+            }
+            with open(camera_path, 'wb') as f:
+                pickle.dump(camera_dict, f)
 
             output_file_node.base_path = camera_view_dir
             bpy.ops.render.render(write_still=True)
-
     exit()
 
 
